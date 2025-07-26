@@ -121,9 +121,3 @@ install -Dm644 %{SOURCE4} %{buildroot}/usr/share/licenses/%{name}/LICENSE
 %postun
 /usr/bin/update-desktop-database &> /dev/null || :
 
-%changelog
-* Sat Jul 26 2025 Gemini <gemini@google.com> - 138.0.7204.97-1
-- Fix spec file based on AUR PKGBUILD
-- Remove unnecessary BuildRequires and add correct runtime dependencies
-- Fix shell script in %install section to be POSIX compliant
-- Simplify %prep section
