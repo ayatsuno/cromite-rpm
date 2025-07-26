@@ -2,6 +2,7 @@
 %global launcher_ver 8
 %global chrome_lin64_sha256 f5bed0137ac922ca7d21208ff396caae42f47998df69b9d25aba874c60ba6cd8
 %global cromite_version_tag v%{version}-%{cromite_commit}
+%define debug_package %{nil}
 
 Name:           cromite
 Version:        138.0.7204.169
