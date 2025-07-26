@@ -90,18 +90,18 @@ jobs:
         run: |
           echo "===== Built files in workspace ====="
           find . -type f | grep -E '\.rpm$'
-
+          
       - name: Find main binary RPM path
         id: find_rpm
         run: |
           RPM_PATH=$(find . -maxdepth 1 -type f -name "cromite-[0-9]*.x86_64.rpm" | grep -v debuginfo | grep -v debugsource | head -n1)
-          echo "RPM_PATH=$RPM_PATH" >> $GITHUB_OUTPUT
+          echo "RPM_PATH=$RPM_PATH" >> "$GITHUB_OUTPUT"
 
       - name: Find SRPM path
         id: find_srpm
         run: |
           SRPM_PATH=$(find . -maxdepth 1 -type f -name "cromite-*.src.rpm" | head -n1)
-          echo "SRPM_PATH=$SRPM_PATH" >> $GITHUB_OUTPUT
+          echo "SRPM_PATH=$SRPM_PATH" >> "$GITHUB_OUTPUT"
 
       - name: Create Release
         if: steps.update_spec.outputs.NEEDS_UPDATE == 'true'
