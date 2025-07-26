@@ -1,0 +1,149 @@
+name: Check for Update, Build and Release
+
+on:
+  workflow_dispatch: # 
+  schedule:
+    - cron: '0 0 * * *'
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get latest Cromite release info
+        id: get_release
+        run: |
+          LATEST_RELEASE=$(curl -s "https://api.github.com/repos/uazo/cromite/releases/latest")
+          TAG_NAME=$(echo "$LATEST_RELEASE" | jq -r '.tag_name')
+          VERSION=$(echo "$TAG_NAME" | sed -e 's/^v//' -e 's/-.*//')
+          CROMITE_COMMIT=$(echo "$TAG_NAME" | sed 's/.*-//')
+          SHA256=$(echo "$LATEST_RELEASE" | jq -r '.assets[] | select(.name=="chrome-lin64.tar.gz") | .digest' | sed 's/sha256://')
+
+          echo "LATEST_VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "CROMITE_COMMIT=$CROMITE_COMMIT" >> $GITHUB_OUTPUT
+          echo "SHA256=$SHA256" >> $GITHUB_OUTPUT
+          echo "LATEST_VERSION: $VERSION"
+          echo "CROMITE_COMMIT: $CROMITE_COMMIT"
+          echo "SHA256: $SHA256"
+        shell: bash
+
+      - name: Update spec file if needed
+        id: update_spec
+        run: |
+          CURRENT_VERSION=$(grep '^Version:' cromite.spec | awk '{print $2}')
+          LATEST_VERSION="${{ steps.get_release.outputs.LATEST_VERSION }}"
+          CROMITE_COMMIT="${{ steps.get_release.outputs.CROMITE_COMMIT }}"
+          SHA256="${{ steps.get_release.outputs.SHA256 }}"
+
+          echo "CURRENT_VERSION: $CURRENT_VERSION"
+          echo "LATEST_VERSION: $LATEST_VERSION"
+          echo "CROMITE_COMMIT: $CROMITE_COMMIT"
+          echo "SHA256: $SHA256"
+
+          if [ "$CURRENT_VERSION" == "$LATEST_VERSION" ]; then
+            echo "NEEDS_UPDATE=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          if [ -z "$LATEST_VERSION" ] || [ -z "$CROMITE_COMMIT" ] || [ -z "$SHA256" ]; then
+            echo "Error: Missing release info. Aborting update."
+            exit 1
+          fi
+
+          sed -i "s/^Version:.*/Version:        ${LATEST_VERSION}/" cromite.spec
+          sed -i "s/^%global cromite_commit .*/%global cromite_commit ${CROMITE_COMMIT}/" cromite.spec
+          sed -i "s/^%global chrome_lin64_sha256 .*/%global chrome_lin64_sha256 ${SHA256}/" cromite.spec
+
+          echo "NEEDS_UPDATE=true" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Build RPM in Fedora container
+        if: steps.update_spec.outputs.NEEDS_UPDATE == 'true'
+        uses: addnab/docker-run-action@v3
+        with:
+          image: fedora:latest
+          options: -v ${{ github.workspace }}:/github/workspace
+          run: |
+            set -e
+            echo "===== workspace ====="
+            ls -lh /github/workspace
+            dnf install -y rpm-build rpmdevtools spectool git binutils tar gcc make pkgconf-pkg-config glib2-devel
+            rpmdev-setuptree
+            cd /github/workspace
+            spectool -g -R cromite.spec
+            cp cromite.desktop cromite.svg LICENSE ~/rpmbuild/SOURCES/
+            rpmbuild -ba cromite.spec
+            echo "===== Built files ====="
+            find ~/rpmbuild
+            find ~/rpmbuild -type f -name "*.rpm" -exec cp {} /github/workspace/ \;
+            echo "===== Copied all RPM/SRPM files to workspace ====="
+            ls -lh /github/workspace/*.rpm || echo "No RPM found"
+
+
+      - name: Show all built RPM/SRPM files (debug)
+        if: steps.update_spec.outputs.NEEDS_UPDATE == 'true'
+        run: |
+          echo "===== Built files in workspace ====="
+          find . -type f | grep -E '\.rpm$'
+
+      - name: Find main binary RPM path
+        id: find_rpm
+        run: |
+          RPM_PATH=$(find . -maxdepth 1 -type f -name "cromite-[0-9]*.x86_64.rpm" | grep -v debuginfo | grep -v debugsource | head -n1)
+          echo "RPM_PATH=$RPM_PATH" >> $GITHUB_OUTPUT
+
+      - name: Find SRPM path
+        id: find_srpm
+        run: |
+          SRPM_PATH=$(find . -maxdepth 1 -type f -name "cromite-*.src.rpm" | head -n1)
+          echo "SRPM_PATH=$SRPM_PATH" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        if: steps.update_spec.outputs.NEEDS_UPDATE == 'true'
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ steps.get_release.outputs.LATEST_VERSION }}
+          release_name: Release v${{ steps.get_release.outputs.LATEST_VERSION }}
+          draft: false
+          prerelease: false
+
+      - name: Upload binary RPM to Release
+        if: steps.update_spec.outputs.NEEDS_UPDATE == 'true'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ steps.find_rpm.outputs.RPM_PATH }}
+          asset_name: cromite-${{ steps.get_release.outputs.LATEST_VERSION }}.rpm
+          asset_content_type: application/x-rpm
+
+      - name: Upload SRPM to Release
+        if: steps.update_spec.outputs.NEEDS_UPDATE == 'true'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ steps.find_srpm.outputs.SRPM_PATH }}
+          asset_name: cromite-${{ steps.get_release.outputs.LATEST_VERSION }}.src.rpm
+          asset_content_type: application/x-rpm
+
+      - name: Commit and push spec file changes
+        if: steps.update_spec.outputs.NEEDS_UPDATE == 'true'
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add cromite.spec
+          git commit -m "Update cromite to version ${{ steps.get_release.outputs.LATEST_VERSION }}"
+          git push
+        shell: bash
+
