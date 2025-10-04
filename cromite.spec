@@ -1,11 +1,11 @@
-%global cromite_commit fde090c0d3690592570011055c980f1679d2b28d
+%global cromite_commit b2824377c30847f42e00c6ace66d91fa516b5f51
 %global launcher_ver 8
-%global chrome_lin64_sha256 c6d9c8123f1876a86675864d3ce0274a045d2c89cd2ea29c05f5bfeb3c7b37f1
+%global chrome_lin64_sha256 334bcf8b26b351d3befa6031e143cd4621d491918f777a20a85397d9dd7a6d06
 %global cromite_version_tag v%{version}-%{cromite_commit}
 %define debug_package %{nil}
 
 Name:           cromite
-Version:        140.0.7339.186
+Version:        141.0.7390.55
 Release:        1%{?dist}
 Summary:        Cromite a Bromite fork with ad blocking and privacy enhancements (binary release)
 
